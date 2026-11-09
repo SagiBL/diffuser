@@ -9,7 +9,7 @@ import diffuser.utils as utils
 
 
 class Parser(utils.Parser):
-    dataset: str = 'maze2d-umaze-v1'
+    dataset: str = 'maze2d-large-v1'
     config: str = 'config.maze2d'
 
 #---------------------------------- setup ----------------------------------#
@@ -33,6 +33,17 @@ policy = Policy(diffusion, dataset.normalizer)
 #---------------------------------- main loop ----------------------------------#
 
 observation = env.reset()
+
+## set start location if specified in config or runtime args
+if hasattr(args, 'start') and args.start is not None:
+    start = args.start
+    if isinstance(start, str):
+        start = eval(start)
+    start_pos = np.array(start[:2])
+    start_vel = np.array(start[2:]) if len(start) > 2 else np.zeros(2)
+    start_state = np.concatenate([start_pos, start_vel])
+    utils.set_state(env, start_state)
+    observation = env.state_vector().copy()
 
 if args.conditional:
     print('Resetting target')

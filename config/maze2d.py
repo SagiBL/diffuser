@@ -95,6 +95,7 @@ base = {
         ## loading
         'diffusion_loadpath': 'f:diffusion/H{horizon}_T{n_diffusion_steps}',
         'diffusion_epoch': 'latest',
+        'start': None,
     },
 
 }
@@ -127,5 +128,6 @@ maze2d_large_v1 = {
     'plan': {
         'horizon': 384,
         'n_diffusion_steps': 256,
+        'start': (1.0, 7.9),
     },
 }
