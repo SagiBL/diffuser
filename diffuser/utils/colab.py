@@ -17,7 +17,7 @@ from .arrays import to_torch, to_np
 from .video import save_video
 
 
-def run_diffusion(model, dataset, obs, n_samples=1, device='cuda:0', **diffusion_kwargs):
+def run_diffusion(model, dataset, obs, n_samples=1, device='cpu', **diffusion_kwargs):
   ## normalize observation for model
   obs = dataset.normalizer.normalize(obs, 'observations')
 

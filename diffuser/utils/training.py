@@ -206,7 +206,7 @@ class Trainer(object):
 
             ## get a single datapoint
             batch = self.dataloader_vis.__next__()
-            conditions = to_device(batch.conditions, 'cuda:0')
+            conditions = to_device(batch.conditions, 'cpu')
 
             ## repeat each item in conditions `n_samples` times
             conditions = apply_dict(

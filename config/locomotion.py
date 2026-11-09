@@ -55,7 +55,7 @@ base = {
         'n_reference': 8,
         'n_samples': 2,
         'bucket': None,
-        'device': 'cuda',
+        'device': 'cpu',
     },
 }
 

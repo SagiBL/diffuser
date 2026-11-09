@@ -33,7 +33,7 @@ def load_config(*loadpath):
     print(config)
     return config
 
-def load_diffusion(*loadpath, epoch='latest', device='cuda:0'):
+def load_diffusion(*loadpath, epoch='latest', device='cpu'):
     dataset_config = load_config(*loadpath, 'dataset_config.pkl')
     render_config = load_config(*loadpath, 'render_config.pkl')
     model_config = load_config(*loadpath, 'model_config.pkl')
