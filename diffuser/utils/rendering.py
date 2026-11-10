@@ -181,7 +181,34 @@ class MuJoCoRenderer:
 
         return composite
 
-    def composite(self, savepath, paths, dim=(1024, 256), **kwargs):
+    def render_samples(self, save_dir, paths, dim=(1024, 256), **kwargs):
+        if save_dir is not None:
+            os.makedirs(save_dir, exist_ok=True)
+
+        render_kwargs = {
+            'trackbodyid': 2,
+            'distance': 10,
+            'lookat': [5, 2, 0.5],
+            'elevation': 0
+        }
+        images = []
+        for i, path in enumerate(paths):
+            ## [ H x obs_dim ]
+            path = atmost_2d(path)
+            img = self.renders(to_np(path), dim=dim, partial=True, qvel=True, render_kwargs=render_kwargs, **kwargs)
+            if save_dir is not None:
+                imageio.imsave(os.path.join(save_dir, f'{i}.png'), img)
+            images.append(img)
+
+        if save_dir is not None:
+            print(f'Saved {len(paths)} samples to: {save_dir}')
+
+        return images
+
+    def composite(self, savepath, paths, dim=(1024, 256), separate=False, **kwargs):
+
+        if separate:
+            return self.render_samples(savepath, paths, dim=dim, **kwargs)
 
         render_kwargs = {
             'trackbodyid': 2,
@@ -301,11 +328,34 @@ class MazeRenderer:
         img = plot2img(fig, remove_margins=self._remove_margins)
         return img
 
-    def composite(self, savepath, paths, ncol=5, **kwargs):
+    def render_samples(self, save_dir, paths, **kwargs):
+        '''
+            save_dir : str
+            observations : [ n_paths x horizon x 2 ]
+        '''
+        if save_dir is not None:
+            os.makedirs(save_dir, exist_ok=True)
+
+        images = []
+        for i, (path, kw) in enumerate(zipkw(paths, **kwargs)):
+            img = self.renders(*path, **kw)
+            if save_dir is not None:
+                imageio.imsave(os.path.join(save_dir, f'{i}.png'), img)
+            images.append(img)
+
+        if save_dir is not None:
+            print(f'Saved {len(paths)} samples to: {save_dir}')
+
+        return images
+
+    def composite(self, savepath, paths, ncol=5, separate=False, **kwargs):
         '''
             savepath : str
             observations : [ n_paths x horizon x 2 ]
         '''
+        if separate:
+            return self.render_samples(savepath, paths, **kwargs)
+
         assert len(paths) % ncol == 0, 'Number of paths must be divisible by number of columns'
 
         images = []

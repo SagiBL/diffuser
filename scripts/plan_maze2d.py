@@ -1,3 +1,4 @@
+import os
 import json
 import numpy as np
 from os.path import join
@@ -71,6 +72,19 @@ for t in range(env.max_episode_steps):
         action, samples = policy(cond, batch_size=args.batch_size)
         actions = samples.actions[0]
         sequence = samples.observations[0]
+
+        ## save plans as .npy files in waypoints folder (outer folder)
+        parent_dir = os.path.dirname(args.savepath) if os.path.basename(args.savepath).isdigit() else args.savepath
+        waypoints_dir = join(parent_dir, 'waypoints')
+        os.makedirs(waypoints_dir, exist_ok=True)
+
+        for i, sample in enumerate(samples.observations):
+            np.save(join(waypoints_dir, f'{i}_waypoints.npy'), sample)
+
+        # combined .npy file of all samples
+        np.save(join(waypoints_dir, 'all_planned_waypoints.npy'), samples.observations)
+
+        print(f'[ plan_maze2d ] Saved {len(samples.observations)} sample(s) to {waypoints_dir}')
     # pdb.set_trace()
 
     # ####
@@ -118,15 +132,13 @@ for t in range(env.max_episode_steps):
     # logger.log(score=score, step=t)
 
     if t % args.vis_freq == 0 or terminal:
-        fullpath = join(args.savepath, f'{t}.png')
-
-        if t == 0: renderer.composite(fullpath, samples.observations, ncol=1)
+        if t == 0: renderer.render_samples(args.savepath, samples.observations)
 
 
         # renderer.render_plan(join(args.savepath, f'{t}_plan.mp4'), samples.actions, samples.observations, state)
 
         ## save rollout thus far
-        renderer.composite(join(args.savepath, 'rollout.png'), np.array(rollout)[None], ncol=1)
+        # renderer.composite(join(args.savepath, 'rollout.png'), np.array(rollout)[None], ncol=1)
 
         # renderer.render_rollout(join(args.savepath, f'rollout.mp4'), rollout, fps=80)
 
