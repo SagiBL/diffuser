@@ -4,14 +4,40 @@ import numpy as np
 from os.path import join
 import pdb
 
+import sys
+
 from diffuser.guides.policies import Policy
 import diffuser.datasets as datasets
 import diffuser.utils as utils
+
+# Support flexible k (inverse temperature) argument syntax:
+# e.g.:
+#   python scripts/plan_maze2d.py k 0.5
+#   python scripts/plan_maze2d.py --k 0.5
+#   python scripts/plan_maze2d.py k=0.5
+#   python scripts/plan_maze2d.py inv_temp 0.5
+new_argv = [sys.argv[0]]
+i = 1
+while i < len(sys.argv):
+    arg = sys.argv[i]
+    if arg in ('k', 'inv_temp', 'inverse_temperature', '--inv_temp', '--inverse_temperature'):
+        new_argv.append('--k')
+        if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith('--'):
+            new_argv.append(sys.argv[i + 1])
+            i += 1
+    elif arg.startswith(('k=', 'inv_temp=', 'inverse_temperature=', '--inv_temp=', '--inverse_temperature=')):
+        new_argv.append('--k')
+        new_argv.append(arg.split('=', 1)[1])
+    else:
+        new_argv.append(arg)
+    i += 1
+sys.argv = new_argv
 
 
 class Parser(utils.Parser):
     dataset: str = 'maze2d-large-v1'
     config: str = 'config.maze2d'
+    k: float = 0.5
 
 #---------------------------------- setup ----------------------------------#
 
@@ -28,6 +54,9 @@ diffusion_experiment = utils.load_diffusion(args.logbase, args.dataset, args.dif
 diffusion = diffusion_experiment.ema
 dataset = diffusion_experiment.dataset
 renderer = diffusion_experiment.renderer
+
+diffusion.k = args.k
+print(f'[ plan_maze2d ] Temporal Score Rescaling (TSR): k = {diffusion.k}')
 
 policy = Policy(diffusion, dataset.normalizer)
 

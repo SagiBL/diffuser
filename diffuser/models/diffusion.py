@@ -15,6 +15,7 @@ class GaussianDiffusion(nn.Module):
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
         loss_type='l1', clip_denoised=False, predict_epsilon=True,
         action_weight=1.0, loss_discount=1.0, loss_weights=None,
+        k=0.5,
     ):
         super().__init__()
         self.horizon = horizon
@@ -22,6 +23,7 @@ class GaussianDiffusion(nn.Module):
         self.action_dim = action_dim
         self.transition_dim = observation_dim + action_dim
         self.model = model
+        self.k = k
 
         betas = cosine_beta_schedule(n_timesteps)
         alphas = 1. - betas
@@ -126,16 +128,61 @@ class GaussianDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
-    def p_sample(self, x, cond, t):
-        b, *_, device = *x.shape, x.device
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, cond=cond, t=t)
+    def p_sample(self, x, cond, t=None, *args, returns=None, **kwargs):
+        if not isinstance(x, torch.Tensor) and isinstance(cond, torch.Tensor):
+            model, x, cond, t = x, cond, t, args[0] if len(args) > 0 else kwargs.get('t')
+        else:
+            model = self.model
+
+        if not torch.is_tensor(t):
+            t = torch.tensor(t, device=x.device)
+
+        # 1. Get the standard noise prediction from the pretrained model
+        model_output = model(x, cond, t)
+
+        # ==========================================================
+        # NEW: Temporal Score Rescaling (TSR)
+        # ==========================================================
+        # k is the inverse temperature. 
+        # k < 1.0 increases diversity (spreads out the distribution)
+        # k > 1.0 decreases diversity (collapses to the smoothest path)
+        k = kwargs.get('k', getattr(self, 'k', 0.5))
+
+        # Extract the noise schedule parameters for this specific timestep
+        # alpha_bar_t is the cumulative product of alphas (often denoted \bar{\alpha}_t)
+        alpha_bar_t = self.alphas_cumprod[t].view(-1, *([1] * (len(x.shape) - 1)))
+
+        # Assuming the trajectory data was normalized to have a variance of ~1.0
+        # The equation r_t simplifies elegantly:
+        # Numerator: alpha_bar_t + (1 - alpha_bar_t) = 1.0
+        # Denominator: alpha_bar_t * k + (1 - alpha_bar_t)
+        denominator = (alpha_bar_t * k) + (1.0 - alpha_bar_t)
+
+        # Calculate the scalar multiplier
+        r_t = 1.0 / denominator
+
+        # Scale the model's output
+        model_output = model_output * r_t
+        # ==========================================================
+
+        # 2. Proceed with the standard DDPM reverse step using the scaled output
+        # The rest of the function remains completely unchanged
+        x_recon = self.predict_start_from_noise(x, t=t, noise=model_output)
+
+        if self.clip_denoised:
+            x_recon.clamp_(-1., 1.)
+
+        model_mean, posterior_variance, posterior_log_variance = self.q_posterior(
+            x_start=x_recon, x_t=x, t=t
+        )
+
         noise = torch.randn_like(x)
-        # no noise when t == 0
-        nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
-        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
+        nonzero_mask = (1 - (t == 0).float()).reshape(x.shape[0], *((1,) * (len(x.shape) - 1)))
+
+        return model_mean + nonzero_mask * (0.5 * posterior_log_variance).exp() * noise
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, cond, verbose=True, return_diffusion=False):
+    def p_sample_loop(self, shape, cond, verbose=True, return_diffusion=False, **kwargs):
         device = self.betas.device
 
         batch_size = shape[0]
@@ -147,7 +194,7 @@ class GaussianDiffusion(nn.Module):
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
         for i in reversed(range(0, self.n_timesteps)):
             timesteps = torch.full((batch_size,), i, device=device, dtype=torch.long)
-            x = self.p_sample(x, cond, timesteps)
+            x = self.p_sample(x, cond, timesteps, **kwargs)
             x = apply_conditioning(x, cond, self.action_dim)
 
             progress.update({'t': i})
