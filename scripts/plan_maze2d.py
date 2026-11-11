@@ -4,14 +4,48 @@ import numpy as np
 from os.path import join
 import pdb
 
+import sys
+
 from diffuser.guides.policies import Policy
 import diffuser.datasets as datasets
 import diffuser.utils as utils
+
+# Support flexible temp_high and temp_low argument syntax:
+# e.g.:
+#   python scripts/plan_maze2d.py temp_high 2.5 temp_low 0.1
+#   python scripts/plan_maze2d.py tmp_high 2.5 tmp_low 0.1
+#   python scripts/plan_maze2d.py --temp_high 2.5 --temp_low 0.1
+new_argv = [sys.argv[0]]
+i = 1
+while i < len(sys.argv):
+    arg = sys.argv[i]
+    if arg in ('temp_high', 'tmp_high', '--tmp_high'):
+        new_argv.append('--temp_high')
+        if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith('--'):
+            new_argv.append(sys.argv[i + 1])
+            i += 1
+    elif arg.startswith(('temp_high=', 'tmp_high=', '--tmp_high=')):
+        new_argv.append('--temp_high')
+        new_argv.append(arg.split('=', 1)[1])
+    elif arg in ('temp_low', 'tmp_low', '--tmp_low'):
+        new_argv.append('--temp_low')
+        if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith('--'):
+            new_argv.append(sys.argv[i + 1])
+            i += 1
+    elif arg.startswith(('temp_low=', 'tmp_low=', '--tmp_low=')):
+        new_argv.append('--temp_low')
+        new_argv.append(arg.split('=', 1)[1])
+    else:
+        new_argv.append(arg)
+    i += 1
+sys.argv = new_argv
 
 
 class Parser(utils.Parser):
     dataset: str = 'maze2d-large-v1'
     config: str = 'config.maze2d'
+    temp_high: float = 2.0
+    temp_low: float = 0.0
 
 #---------------------------------- setup ----------------------------------#
 
@@ -28,6 +62,10 @@ diffusion_experiment = utils.load_diffusion(args.logbase, args.dataset, args.dif
 diffusion = diffusion_experiment.ema
 dataset = diffusion_experiment.dataset
 renderer = diffusion_experiment.renderer
+
+diffusion.temp_high = args.temp_high
+diffusion.temp_low = args.temp_low
+print(f'[ plan_maze2d ] Temperature schedule: temp_high = {diffusion.temp_high}, temp_low = {diffusion.temp_low}')
 
 policy = Policy(diffusion, dataset.normalizer)
 

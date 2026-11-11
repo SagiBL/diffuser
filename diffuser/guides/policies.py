@@ -36,7 +36,7 @@ class Policy:
         )
         return conditions
 
-    def __call__(self, conditions, debug=False, batch_size=1):
+    def __call__(self, conditions, debug=False, batch_size=1, **kwargs):
 
 
         conditions = self._format_conditions(conditions, batch_size)
@@ -46,7 +46,7 @@ class Policy:
         # observation = utils.to_torch(observation_np, device=self.device)
 
         ## run reverse diffusion process
-        sample = self.diffusion_model(conditions)
+        sample = self.diffusion_model(conditions, **kwargs)
         sample = utils.to_np(sample)
 
         ## extract action [ batch_size x horizon x transition_dim ]

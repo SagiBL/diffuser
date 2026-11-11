@@ -15,6 +15,7 @@ class GaussianDiffusion(nn.Module):
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
         loss_type='l1', clip_denoised=False, predict_epsilon=True,
         action_weight=1.0, loss_discount=1.0, loss_weights=None,
+        temp_high=2.0, temp_low=0.0,
     ):
         super().__init__()
         self.horizon = horizon
@@ -22,6 +23,8 @@ class GaussianDiffusion(nn.Module):
         self.action_dim = action_dim
         self.transition_dim = observation_dim + action_dim
         self.model = model
+        self.temp_high = temp_high
+        self.temp_low = temp_low
 
         betas = cosine_beta_schedule(n_timesteps)
         alphas = 1. - betas
@@ -89,6 +92,14 @@ class GaussianDiffusion(nn.Module):
         loss_weights[0, :self.action_dim] = action_weight
         return loss_weights
 
+    @property
+    def num_timesteps(self):
+        return self.n_timesteps
+
+    @num_timesteps.setter
+    def num_timesteps(self, value):
+        self.n_timesteps = int(value)
+
     #------------------------------------------ sampling ------------------------------------------#
 
     def predict_start_from_noise(self, x_t, t, noise):
@@ -126,16 +137,45 @@ class GaussianDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
-    def p_sample(self, x, cond, t):
+    def p_sample(self, x, cond, t=None, *args, returns=None, **kwargs):
+        if not isinstance(x, torch.Tensor) and isinstance(cond, torch.Tensor):
+            # Support signature: p_sample(self, model, x, cond, t, returns=None)
+            x, cond, t = cond, t, args[0] if len(args) > 0 else kwargs.get('t')
+
+        if not torch.is_tensor(t):
+            t = torch.tensor(t, device=x.device)
+
         b, *_, device = *x.shape, x.device
         model_mean, _, model_log_variance = self.p_mean_variance(x=x, cond=cond, t=t)
+
+        # Standard noise generation
         noise = torch.randn_like(x)
-        # no noise when t == 0
-        nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
-        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
+
+        # Mask out noise at t=0 (we want deterministic output at the final step)
+        nonzero_mask = (1 - (t == 0).float()).reshape(x.shape[0], *((1,) * (len(x.shape) - 1)))
+
+        # ==========================================================
+        # NEW: Early-Heavy Temperature Scheduling
+        # ==========================================================
+        # Calculate relative time tau, ranging from 1.0 (start) to 0.0 (end)
+        tau = t.float() / self.num_timesteps
+
+        # Reshape tau for proper broadcasting against the trajectory tensor [batch, horizon, state_dim]
+        tau = tau.view(-1, *([1] * (len(x.shape) - 1)))
+
+        # Define the temperature schedule bounds
+        temp_high = kwargs.get('temp_high', getattr(self, 'temp_high', 2.0))  # Massive exploration at the beginning
+        temp_low = kwargs.get('temp_low', getattr(self, 'temp_low', 0.0))   # Deterministic smoothing at the end
+
+        # Compute the time-dependent gamma factor (linear decay)
+        gamma_t = temp_low + (temp_high - temp_low) * tau
+        # ==========================================================
+
+        # Apply gamma_t to the injected noise
+        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise * gamma_t
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, cond, verbose=True, return_diffusion=False):
+    def p_sample_loop(self, shape, cond, verbose=True, return_diffusion=False, **kwargs):
         device = self.betas.device
 
         batch_size = shape[0]
@@ -147,7 +187,7 @@ class GaussianDiffusion(nn.Module):
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
         for i in reversed(range(0, self.n_timesteps)):
             timesteps = torch.full((batch_size,), i, device=device, dtype=torch.long)
-            x = self.p_sample(x, cond, timesteps)
+            x = self.p_sample(x, cond, timesteps, **kwargs)
             x = apply_conditioning(x, cond, self.action_dim)
 
             progress.update({'t': i})
