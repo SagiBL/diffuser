@@ -142,6 +142,6 @@ maze2d_large_v1 = {
         'horizon': 384,
         'n_diffusion_steps': 256,
         'start': (1.0, 7.9),
-        'obstacles': [(3.0, 6.0, 0.6)],
+        'obstacles': [(3.0, 6.0, 0.6), (2.3, 8.0, 0.6)],
     },
 }
