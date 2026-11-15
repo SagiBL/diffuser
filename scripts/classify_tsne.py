@@ -450,6 +450,24 @@ def plot_classified_tsne(
     print(f"  -> Saved classified t-SNE plot to: {save_path}")
 
 
+def _load_obstacles_from_exp(save_path: str):
+    """Auto-detect obstacles and obstacle_margin from rollout.json or args.json in the experiment directory."""
+    import json
+    from matplotlib.patches import Circle, Rectangle
+    exp_dir = os.path.dirname(os.path.dirname(save_path))
+    for sub in ["0", "test_x0", "test_xt", ""]:
+        cand_dir = os.path.join(exp_dir, sub) if sub else exp_dir
+        rollout_file = os.path.join(cand_dir, "rollout.json")
+        if os.path.isfile(rollout_file):
+            try:
+                data = json.load(open(rollout_file, "r"))
+                if "obstacles" in data and data["obstacles"]:
+                    return data["obstacles"], float(data.get("obstacle_margin", 0.0))
+            except Exception:
+                pass
+    return [], 0.0
+
+
 def plot_classified_trajectories(
     waypoints: np.ndarray,
     run_ids: list,
@@ -459,14 +477,38 @@ def plot_classified_trajectories(
 ):
     """
     Plots the spatial trajectories (y, x) colored by their assigned group,
-    with anchor trajectories plotted prominently.
+    with anchor trajectories and any unseen obstacles plotted prominently.
     """
+    from matplotlib.patches import Circle, Rectangle
     n_anchors = len(anchor_ids)
     run_id_to_idx = {rid: idx for idx, rid in enumerate(run_ids)}
 
     fig, ax = plt.subplots(figsize=(8, 8), dpi=300)
     fig.patch.set_facecolor("#fcfcfc")
     ax.set_facecolor("#ffffff")
+
+    obstacles, margin = _load_obstacles_from_exp(save_path)
+    for obs in obstacles:
+        if obs.get("type") == "circle":
+            cy, cx = obs["center"]
+            r = obs["radius"]
+            if margin > 0:
+                ax.add_patch(
+                    Circle((cx, cy), r + margin, facecolor="none", edgecolor="#d62728", linestyle="--", linewidth=1.3, alpha=0.8, zorder=3)
+                )
+            ax.add_patch(
+                Circle((cx, cy), r, facecolor="#e63946", edgecolor="#800000", linewidth=1.8, alpha=0.72, zorder=4, label="Unseen Obstacle")
+            )
+        elif obs.get("type") == "box":
+            ymin, ymax, xmin, xmax = obs["bounds"]
+            if margin > 0:
+                ax.add_patch(
+                    Rectangle((xmin - margin, ymin - margin), (xmax - xmin) + 2 * margin, (ymax - ymin) + 2 * margin,
+                              facecolor="none", edgecolor="#d62728", linestyle="--", linewidth=1.3, alpha=0.8, zorder=3)
+                )
+            ax.add_patch(
+                Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, facecolor="#e63946", edgecolor="#800000", linewidth=1.8, alpha=0.72, zorder=4, label="Unseen Obstacle")
+            )
 
     # Plot trajectories for each group
     for k in range(n_anchors):

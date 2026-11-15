@@ -311,13 +311,98 @@ class MazeRenderer:
         self._background = self._config != ' '
         self._remove_margins = False
         self._extent = (0, 1, 1, 0)
+        self.obstacles = []
+        self.obstacle_margin = 0.0
 
-    def renders(self, observations, conditions=None, title=None):
+    def set_obstacles(self, obstacles, margin=0.0):
+        from diffuser.guides.obstacles import parse_obstacles
+        self.obstacles = parse_obstacles(obstacles)
+        self.obstacle_margin = float(margin) if margin is not None else 0.0
+
+    def _draw_obstacles(self, ax, iscale=1.0, jscale=1.0, obstacles=None, margin=None):
+        from matplotlib.patches import Ellipse, Rectangle
+        from diffuser.guides.obstacles import parse_obstacles
+
+        obs_list = parse_obstacles(obstacles) if obstacles is not None else getattr(self, 'obstacles', [])
+        if not obs_list:
+            return
+        m = float(margin) if margin is not None else getattr(self, 'obstacle_margin', 0.0)
+
+        for obs in obs_list:
+            if obs['type'] == 'circle':
+                cy, cx = obs['center']
+                r = obs['radius']
+                cx_plot = (cx + 0.5) / jscale
+                cy_plot = (cy + 0.5) / iscale
+                if m > 0:
+                    margin_patch = Ellipse(
+                        (cx_plot, cy_plot),
+                        width=2.0 * (r + m) / jscale,
+                        height=2.0 * (r + m) / iscale,
+                        facecolor='none',
+                        edgecolor='#d62728',
+                        linestyle='--',
+                        linewidth=1.3,
+                        alpha=0.8,
+                        zorder=14,
+                    )
+                    ax.add_patch(margin_patch)
+                patch = Ellipse(
+                    (cx_plot, cy_plot),
+                    width=2.0 * r / jscale,
+                    height=2.0 * r / iscale,
+                    facecolor='#e63946',
+                    edgecolor='#800000',
+                    linewidth=1.8,
+                    alpha=0.72,
+                    zorder=15,
+                )
+                ax.add_patch(patch)
+            elif obs['type'] == 'box':
+                ymin, ymax, xmin, xmax = obs['bounds']
+                x0 = (xmin + 0.5) / jscale
+                y0 = (ymin + 0.5) / iscale
+                w = (xmax - xmin) / jscale
+                h = (ymax - ymin) / iscale
+                if m > 0:
+                    mx0 = (xmin - m + 0.5) / jscale
+                    my0 = (ymin - m + 0.5) / iscale
+                    mw = (xmax - xmin + 2.0 * m) / jscale
+                    mh = (ymax - ymin + 2.0 * m) / iscale
+                    margin_patch = Rectangle(
+                        (mx0, my0),
+                        mw,
+                        mh,
+                        facecolor='none',
+                        edgecolor='#d62728',
+                        linestyle='--',
+                        linewidth=1.3,
+                        alpha=0.8,
+                        zorder=14,
+                    )
+                    ax.add_patch(margin_patch)
+                patch = Rectangle(
+                    (x0, y0),
+                    w,
+                    h,
+                    facecolor='#e63946',
+                    edgecolor='#800000',
+                    linewidth=1.8,
+                    alpha=0.72,
+                    zorder=15,
+                )
+                ax.add_patch(patch)
+
+    def renders(self, observations, conditions=None, title=None, obstacles=None, margin=None, _scales=(1.0, 1.0)):
         plt.clf()
         fig = plt.gcf()
         fig.set_size_inches(5, 5)
         plt.imshow(self._background * .5,
             extent=self._extent, cmap=plt.cm.binary, vmin=0, vmax=1)
+
+        ax = plt.gca()
+        iscale, jscale = _scales
+        self._draw_obstacles(ax, iscale=iscale, jscale=jscale, obstacles=obstacles, margin=margin)
 
         path_length = len(observations)
         colors = plt.cm.jet(np.linspace(0,1,path_length))
@@ -381,6 +466,8 @@ class Maze2dRenderer(MazeRenderer):
         self._background = self.env.maze_arr == 10
         self._remove_margins = False
         self._extent = (0, 1, 1, 0)
+        self.obstacles = []
+        self.obstacle_margin = 0.0
 
     def renders(self, observations, conditions=None, **kwargs):
         bounds = MAZE_BOUNDS[self.env_name]
@@ -388,6 +475,7 @@ class Maze2dRenderer(MazeRenderer):
         observations = observations + .5
         if len(bounds) == 2:
             _, scale = bounds
+            iscale, jscale = scale, scale
             observations /= scale
         elif len(bounds) == 4:
             _, iscale, _, jscale = bounds
@@ -397,8 +485,8 @@ class Maze2dRenderer(MazeRenderer):
             raise RuntimeError(f'Unrecognized bounds for {self.env_name}: {bounds}')
 
         if conditions is not None:
-            conditions /= scale
-        return super().renders(observations, conditions, **kwargs)
+            conditions /= iscale
+        return super().renders(observations, conditions, _scales=(iscale, jscale), **kwargs)
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- rollouts ---------------------------------#

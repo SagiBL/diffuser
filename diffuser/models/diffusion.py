@@ -15,6 +15,9 @@ class GaussianDiffusion(nn.Module):
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
         loss_type='l1', clip_denoised=False, predict_epsilon=True,
         action_weight=1.0, loss_discount=1.0, loss_weights=None,
+        guide=None, guidance_method='x0', guidance_scale=0.15,
+        n_guide_steps=2, t_stopgrad=0, scale_grad_by_std=False,
+        use_basin_escape=False,
     ):
         super().__init__()
         self.horizon = horizon
@@ -22,6 +25,13 @@ class GaussianDiffusion(nn.Module):
         self.action_dim = action_dim
         self.transition_dim = observation_dim + action_dim
         self.model = model
+        self.guide = guide
+        self.guidance_method = guidance_method
+        self.guidance_scale = guidance_scale
+        self.n_guide_steps = n_guide_steps
+        self.t_stopgrad = t_stopgrad
+        self.scale_grad_by_std = scale_grad_by_std
+        self.use_basin_escape = use_basin_escape
 
         betas = cosine_beta_schedule(n_timesteps)
         alphas = 1. - betas
@@ -126,7 +136,33 @@ class GaussianDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
-    def p_sample(self, x, cond, t):
+    def p_sample(self, x, cond, t, **kwargs):
+        guide = kwargs.get('guide', getattr(self, 'guide', None))
+        guidance_method = kwargs.get('guidance_method', getattr(self, 'guidance_method', 'x0'))
+
+        if guide is not None and str(guidance_method).lower() not in ('none', 'false', 'off'):
+            from diffuser.guides.functions import guided_p_sample
+            scale = kwargs.get('scale', kwargs.get('guidance_scale', getattr(self, 'guidance_scale', 0.15)))
+            t_stopgrad = kwargs.get('t_stopgrad', getattr(self, 't_stopgrad', 0))
+            n_guide_steps = kwargs.get('n_guide_steps', getattr(self, 'n_guide_steps', 2))
+            scale_grad_by_std = kwargs.get('scale_grad_by_std', getattr(self, 'scale_grad_by_std', False))
+            use_basin_escape = kwargs.get('use_basin_escape', getattr(self, 'use_basin_escape', False))
+
+            x_next, _ = guided_p_sample(
+                model=self,
+                x=x,
+                cond=cond,
+                t=t,
+                guide=guide,
+                guidance_method=guidance_method,
+                scale=scale,
+                t_stopgrad=t_stopgrad,
+                n_guide_steps=n_guide_steps,
+                scale_grad_by_std=scale_grad_by_std,
+                use_basin_escape=use_basin_escape,
+            )
+            return x_next
+
         b, *_, device = *x.shape, x.device
         model_mean, _, model_log_variance = self.p_mean_variance(x=x, cond=cond, t=t)
         noise = torch.randn_like(x)
@@ -135,7 +171,7 @@ class GaussianDiffusion(nn.Module):
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, cond, verbose=True, return_diffusion=False):
+    def p_sample_loop(self, shape, cond, verbose=True, return_diffusion=False, **kwargs):
         device = self.betas.device
 
         batch_size = shape[0]
@@ -147,7 +183,7 @@ class GaussianDiffusion(nn.Module):
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
         for i in reversed(range(0, self.n_timesteps)):
             timesteps = torch.full((batch_size,), i, device=device, dtype=torch.long)
-            x = self.p_sample(x, cond, timesteps)
+            x = self.p_sample(x, cond, timesteps, **kwargs)
             x = apply_conditioning(x, cond, self.action_dim)
 
             progress.update({'t': i})

@@ -96,6 +96,19 @@ base = {
         'diffusion_loadpath': 'f:diffusion/H{horizon}_T{n_diffusion_steps}',
         'diffusion_epoch': 'latest',
         'start': None,
+
+        ## obstacle gradient guidance
+        'use_guidance': True,
+        'guidance_method': 'x0',
+        'obstacles': None,
+        'obstacle_margin': 0.3,
+        'guidance_scale': 0.15,
+        'n_guide_steps': 2,
+        't_stopgrad': 0,
+        'scale_grad_by_std': False,
+        'smoothness_weight': 0.05,
+        'n_substeps': 5,
+        'use_basin_escape': False,
     },
 
 }
@@ -129,5 +142,6 @@ maze2d_large_v1 = {
         'horizon': 384,
         'n_diffusion_steps': 256,
         'start': (1.0, 7.9),
+        'obstacles': [(3.0, 6.0, 0.6)],
     },
 }

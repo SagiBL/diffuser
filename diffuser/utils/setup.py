@@ -104,7 +104,7 @@ class Parser(Tap):
                 val = None
             elif val == 'latest':
                 val = 'latest'
-            elif old_type in [bool, type(None)]:
+            elif old_type in [bool, list, tuple, dict, type(None)]:
                 try:
                     val = eval(val)
                 except:
