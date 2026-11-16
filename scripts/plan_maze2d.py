@@ -42,6 +42,16 @@ _ALIAS_MAP = {
     '--smoothness_weight': 'smoothness_weight',
     'use_basin_escape': 'use_basin_escape',
     '--use_basin_escape': 'use_basin_escape',
+    'save_name': 'save_name',
+    '--save_name': 'save_name',
+    'exp_name': 'save_name',
+    '--exp_name': 'save_name',
+    'folder': 'save_name',
+    '--folder': 'save_name',
+    'folder_name': 'save_name',
+    '--folder_name': 'save_name',
+    'seed': 'seed',
+    '--seed': 'seed',
 }
 
 new_argv = [sys.argv[0]]
@@ -186,6 +196,8 @@ for t in range(env.max_episode_steps):
     ## that we really only need to plan once
     if t == 0:
         cond[0] = observation
+        if getattr(args, 'seed', None) is not None:
+            utils.set_seed(int(args.seed))
 
         action, samples = policy(cond, batch_size=args.batch_size)
 

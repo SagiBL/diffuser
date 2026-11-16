@@ -47,64 +47,66 @@ def _langevin_basin_escape(model, x, cond, t, guide, scale=0.15):
         x_pushed = apply_conditioning(x_pushed, cond, model.action_dim)
 
     # Re-noise x_pushed to timestep t and check what the U-Net predicts
-    x_candidate = model.q_sample(x_start=x_pushed, t=t, noise=torch.randn_like(x))
-    x_candidate = apply_conditioning(x_candidate, cond, model.action_dim)
-    x_cand_recon = model.predict_start_from_noise(
-        x_candidate, t=t, noise=model.model(x_candidate, cond, t)
-    )
-    if model.clip_denoised:
-        x_cand_recon.clamp_(-1.0, 1.0)
+    # Fork RNG so basin escape does not alter the main reverse-loop RNG stream for other samples/steps
+    with torch.random.fork_rng():
+        x_candidate = model.q_sample(x_start=x_pushed, t=t, noise=torch.randn_like(x))
+        x_candidate = apply_conditioning(x_candidate, cond, model.action_dim)
+        x_cand_recon = model.predict_start_from_noise(
+            x_candidate, t=t, noise=model.model(x_candidate, cond, t)
+        )
+        if model.clip_denoised:
+            x_cand_recon.clamp_(-1.0, 1.0)
 
-    cand_pos = guide.unnormalize_positions(x_cand_recon[:, :, model.action_dim : model.action_dim + 2])
-    cand_sdfs = guide.compute_obstacle_sdfs(guide.dense_segment_points(cand_pos))
-    cand_min_sdf = cand_sdfs.min(dim=-1).values.min(dim=-1).values  # [B]
+        cand_pos = guide.unnormalize_positions(x_cand_recon[:, :, model.action_dim : model.action_dim + 2])
+        cand_sdfs = guide.compute_obstacle_sdfs(guide.dense_segment_points(cand_pos))
+        cand_min_sdf = cand_sdfs.min(dim=-1).values.min(dim=-1).values  # [B]
 
-    # Update samples where candidate improved clearance
-    improved = colliding & (cand_min_sdf > min_sdf)
-    if improved.any():
-        x = torch.where(improved[:, None, None], x_candidate, x)
-        min_sdf = torch.where(improved, cand_min_sdf, min_sdf)
-        x_recon = torch.where(improved[:, None, None], x_cand_recon, x_recon)
+        # Update samples where candidate improved clearance
+        improved = colliding & (cand_min_sdf > min_sdf)
+        if improved.any():
+            x = torch.where(improved[:, None, None], x_candidate, x)
+            min_sdf = torch.where(improved, cand_min_sdf, min_sdf)
+            x_recon = torch.where(improved[:, None, None], x_cand_recon, x_recon)
 
-    # If any sample is still trapped in the dead-end corridor:
-    still_colliding = min_sdf < threshold
-    if still_colliding.any():
-        safe_indices = torch.where(~still_colliding)[0]
-        bad_indices = torch.where(still_colliding)[0]
-        if len(safe_indices) > 0:
-            for idx_pos, b_idx in enumerate(bad_indices):
-                donor_idx = safe_indices[idx_pos % len(safe_indices)]
-                donor_x0 = x_recon[donor_idx : donor_idx + 1]
-                fresh_xt = model.q_sample(
-                    x_start=donor_x0,
-                    t=t[b_idx : b_idx + 1],
-                    noise=torch.randn_like(donor_x0),
-                )
-                x[b_idx : b_idx + 1] = apply_conditioning(
-                    fresh_xt,
-                    {k: v[b_idx : b_idx + 1] for k, v in cond.items()},
-                    model.action_dim,
-                )
-        else:
-            # General fallback (e.g. when batch_size == 1): sample K=6 fresh proposals at step t
-            # and select the proposal whose predicted x_0_hat has the highest minimum SDF clearance
-            K = 6
-            for b_idx in bad_indices:
-                sub_cond = {k: v[b_idx : b_idx + 1].repeat(K, 1) for k, v in cond.items()}
-                t_k = t[b_idx : b_idx + 1].repeat(K)
-                proposals = torch.randn((K, x.shape[1], x.shape[2]), device=x.device, dtype=x.dtype)
-                proposals = apply_conditioning(proposals, sub_cond, model.action_dim)
-                prop_x0 = model.predict_start_from_noise(
-                    proposals, t=t_k, noise=model.model(proposals, sub_cond, t_k)
-                )
-                if model.clip_denoised:
-                    prop_x0.clamp_(-1.0, 1.0)
-                prop_pos = guide.unnormalize_positions(prop_x0[:, :, model.action_dim : model.action_dim + 2])
-                prop_sdfs = guide.compute_obstacle_sdfs(guide.dense_segment_points(prop_pos))
-                prop_min_sdf = prop_sdfs.min(dim=-1).values.min(dim=-1).values  # [K]
-                best_k = torch.argmax(prop_min_sdf)
-                if prop_min_sdf[best_k] > min_sdf[b_idx]:
-                    x[b_idx : b_idx + 1] = proposals[best_k : best_k + 1]
+        # If any sample is still trapped in the dead-end corridor:
+        still_colliding = min_sdf < threshold
+        if still_colliding.any():
+            safe_indices = torch.where(~still_colliding)[0]
+            bad_indices = torch.where(still_colliding)[0]
+            if len(safe_indices) > 0:
+                for idx_pos, b_idx in enumerate(bad_indices):
+                    donor_idx = safe_indices[idx_pos % len(safe_indices)]
+                    donor_x0 = x_recon[donor_idx : donor_idx + 1]
+                    fresh_xt = model.q_sample(
+                        x_start=donor_x0,
+                        t=t[b_idx : b_idx + 1],
+                        noise=torch.randn_like(donor_x0),
+                    )
+                    x[b_idx : b_idx + 1] = apply_conditioning(
+                        fresh_xt,
+                        {k: v[b_idx : b_idx + 1] for k, v in cond.items()},
+                        model.action_dim,
+                    )
+            else:
+                # General fallback (e.g. when batch_size == 1): sample K=6 fresh proposals at step t
+                # and select the proposal whose predicted x_0_hat has the highest minimum SDF clearance
+                K = 6
+                for b_idx in bad_indices:
+                    sub_cond = {k: v[b_idx : b_idx + 1].repeat(K, 1) for k, v in cond.items()}
+                    t_k = t[b_idx : b_idx + 1].repeat(K)
+                    proposals = torch.randn((K, x.shape[1], x.shape[2]), device=x.device, dtype=x.dtype)
+                    proposals = apply_conditioning(proposals, sub_cond, model.action_dim)
+                    prop_x0 = model.predict_start_from_noise(
+                        proposals, t=t_k, noise=model.model(proposals, sub_cond, t_k)
+                    )
+                    if model.clip_denoised:
+                        prop_x0.clamp_(-1.0, 1.0)
+                    prop_pos = guide.unnormalize_positions(prop_x0[:, :, model.action_dim : model.action_dim + 2])
+                    prop_sdfs = guide.compute_obstacle_sdfs(guide.dense_segment_points(prop_pos))
+                    prop_min_sdf = prop_sdfs.min(dim=-1).values.min(dim=-1).values  # [K]
+                    best_k = torch.argmax(prop_min_sdf)
+                    if prop_min_sdf[best_k] > min_sdf[b_idx]:
+                        x[b_idx : b_idx + 1] = proposals[best_k : best_k + 1]
 
     return x
 

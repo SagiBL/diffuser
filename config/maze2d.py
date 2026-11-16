@@ -77,6 +77,7 @@ base = {
     'plan': {
         'batch_size': 1,
         'device': 'cpu',
+        'seed': 42,
 
         ## diffusion model
         'horizon': 256,
@@ -88,6 +89,7 @@ base = {
         'logbase': 'logs',
         'prefix': 'plans/release',
         'exp_name': watch(plan_args_to_watch),
+        'save_name': None,
         'suffix': '0',
 
         'conditional': False,

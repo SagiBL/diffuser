@@ -104,6 +104,8 @@ class Parser(Tap):
                 val = None
             elif val == 'latest':
                 val = 'latest'
+            elif key in ('save_name', 'exp_name', 'suffix', 'prefix', 'logbase', 'device') or callable(old_val):
+                val = str(val)
             elif old_type in [bool, list, tuple, dict, type(None)]:
                 try:
                     val = eval(val)
@@ -132,9 +134,29 @@ class Parser(Tap):
     def generate_exp_name(self, args):
         if not 'exp_name' in dir(args):
             return
+        save_name = getattr(args, 'save_name', None)
         exp_name = getattr(args, 'exp_name')
-        if callable(exp_name):
+        if save_name is not None and str(save_name).strip() != '':
+            custom_name = str(save_name).strip()
+            prefix_dir = os.path.dirname(getattr(args, 'prefix', 'plans/release'))
+            if prefix_dir and not custom_name.startswith(prefix_dir + '/'):
+                exp_name_string = os.path.join(prefix_dir, custom_name)
+            else:
+                exp_name_string = custom_name
+            print(f'[ utils/setup ] Using custom save folder: {exp_name_string}')
+            setattr(args, 'exp_name', exp_name_string)
+            self._dict['exp_name'] = exp_name_string
+        elif callable(exp_name):
             exp_name_string = exp_name(args)
+            print(f'[ utils/setup ] Setting exp_name to: {exp_name_string}')
+            setattr(args, 'exp_name', exp_name_string)
+            self._dict['exp_name'] = exp_name_string
+        elif isinstance(exp_name, str):
+            prefix_dir = os.path.dirname(getattr(args, 'prefix', 'plans/release'))
+            if prefix_dir and not exp_name.startswith(prefix_dir + '/'):
+                exp_name_string = os.path.join(prefix_dir, exp_name)
+            else:
+                exp_name_string = exp_name
             print(f'[ utils/setup ] Setting exp_name to: {exp_name_string}')
             setattr(args, 'exp_name', exp_name_string)
             self._dict['exp_name'] = exp_name_string
